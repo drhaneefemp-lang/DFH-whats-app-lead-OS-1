@@ -41,6 +41,7 @@ from whatsapp_service import WhatsAppService
 from auth import generate_api_key, hash_api_key, validate_api_key, api_key_header
 from automation_engine import AutomationEngine
 from automation_scheduler import get_scheduler
+from webhook_security import validate_webhook_request, is_signature_verification_enabled
 
 # Load environment
 ROOT_DIR = Path(__file__).parent
@@ -1190,7 +1191,7 @@ async def get_response_times(
             
         try:
             msg_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-        except:
+        except ValueError:
             continue
         
         if msg.get("direction") == "inbound":
@@ -1500,9 +1501,20 @@ async def receive_webhook(request: Request):
     Handles:
     - Incoming messages (text, image, document, video)
     - Message status updates (sent, delivered, read, failed)
+    
+    Security:
+    - Verifies X-Hub-Signature-256 if META_APP_SECRET is configured
     """
     try:
-        body = await request.json()
+        # Verify webhook signature (if APP_SECRET is configured)
+        if is_signature_verification_enabled():
+            body_bytes = await validate_webhook_request(request)
+            body = json.loads(body_bytes)
+            logger.info("Webhook signature verified successfully")
+        else:
+            body = await request.json()
+            logger.debug("Signature verification skipped (META_APP_SECRET not configured)")
+        
         logger.info(f"Webhook received: {json.dumps(body, indent=2)}")
         
         if body.get("object") != "whatsapp_business_account":
