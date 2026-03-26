@@ -1,21 +1,25 @@
-# WhatsApp Business API + CRM Backend Service - PRD
+# WhatsApp Business API + CRM + Inbox UI - PRD
 
 ## Original Problem Statement
 1. **WhatsApp Business API Service**: Connect multiple WhatsApp numbers, handle webhooks, store messages, send messages via API
 2. **CRM Module**: Auto-create leads from WhatsApp messages, manage agents, track lead stages
+3. **Inbox UI**: WhatsApp-style chat interface with conversation list, chat panel, and lead sidebar
 
 ## User Choices
 - **WhatsApp Provider**: Meta's official WhatsApp Cloud API
-- **Authentication**: API Key-based (X-API-Key header)
+- **Authentication**: API Key-based (auto-created on first load)
 - **Message Types**: Text + Media (images, documents, videos)
-- **Database**: MongoDB (user preferred over PostgreSQL)
+- **Database**: MongoDB
 - **Lead Creation**: Auto-create from incoming WhatsApp messages
 - **Agent Management**: Full CRUD system
+- **Frontend**: React with polling for real-time updates
+- **Access**: Open (no login required)
 
 ## Architecture
-- **Framework**: FastAPI (Python)
+- **Backend**: FastAPI (Python)
+- **Frontend**: React + TailwindCSS
 - **Database**: MongoDB
-- **External API**: Meta WhatsApp Cloud API
+- **Real-time**: Polling (5s conversations, 3s messages)
 
 ## What's Been Implemented
 
@@ -24,117 +28,74 @@
 - ✅ Webhook verification & message receiver
 - ✅ Message sending (text, image, document, video, template)
 - ✅ Message storage with status tracking
-- ✅ API key authentication
 
 ### Phase 2: CRM Module (2026-03-26)
 - ✅ Agent management (create, list, update, deactivate)
 - ✅ Lead management (create, list, update, delete)
 - ✅ Lead stages: New → Contacted → Interested → Converted/Lost
-- ✅ Lead sources: WhatsApp, Manual, Website, Referral, Other
 - ✅ Auto-lead creation from WhatsApp messages
 - ✅ Lead assignment to agents
 - ✅ Lead status history tracking
-- ✅ Lead statistics endpoint
 
-## API Endpoints
+### Phase 3: Inbox UI (2026-03-26)
+- ✅ 3-panel WhatsApp-style layout
+- ✅ Conversation list with search & status filter
+- ✅ Chat interface with message display
+- ✅ Lead details sidebar
+- ✅ Agent assignment dropdown
+- ✅ Status update dropdown
+- ✅ Tag management
+- ✅ Real-time polling updates
 
-### WhatsApp APIs
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/numbers | Connect WhatsApp number |
-| GET | /api/numbers | List connected numbers |
-| GET/POST | /api/webhook/whatsapp | Webhook handling |
-| POST | /api/messages/{type} | Send messages |
-| GET | /api/messages | Message history |
+## UI Components
 
-### CRM: Agent APIs
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/agents | Create agent |
-| GET | /api/agents | List agents |
-| GET | /api/agents/{id} | Get agent |
-| PATCH | /api/agents/{id} | Update agent |
-| DELETE | /api/agents/{id} | Deactivate agent |
+### Conversation List Panel
+- Search by name/phone
+- Filter by lead status
+- Show contact name, last message, status indicator
+- Active conversation highlighting
 
-### CRM: Lead APIs
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/leads | Create lead |
-| GET | /api/leads | List leads (with filters) |
-| GET | /api/leads/stats | Lead statistics |
-| GET | /api/leads/{id} | Get lead |
-| PATCH | /api/leads/{id} | Update lead |
-| POST | /api/leads/{id}/assign | Assign to agent |
-| POST | /api/leads/{id}/status | Update status |
-| DELETE | /api/leads/{id} | Delete lead |
+### Chat Message Interface
+- WhatsApp-style bubbles (green for outbound, white for inbound)
+- Date separators
+- Message timestamps
+- Status indicators (sent, delivered, read)
+- Message input with send button
 
-## Lead Stages Flow
-```
-NEW → CONTACTED → INTERESTED → CONVERTED
-                            ↘ LOST
-```
+### Lead Details Sidebar
+- Contact information
+- Lead status with dropdown
+- Agent assignment with dropdown
+- Tag management (add/remove)
+- First message display
+- Notes section
 
-## Database Schema (MongoDB Collections)
-
-### agents
-```json
-{
-  "id": "uuid",
-  "name": "string",
-  "email": "string (unique)",
-  "phone": "string",
-  "department": "string",
-  "is_active": "boolean",
-  "leads_count": "integer",
-  "created_at": "datetime",
-  "updated_at": "datetime"
-}
-```
-
-### leads
-```json
-{
-  "id": "uuid",
-  "name": "string",
-  "phone": "string (unique)",
-  "email": "string",
-  "source": "whatsapp|manual|website|referral|other",
-  "status": "new|contacted|interested|converted|lost",
-  "assigned_agent_id": "string",
-  "assigned_agent_name": "string",
-  "notes": "string",
-  "tags": ["string"],
-  "first_message": "string",
-  "message_count": "integer",
-  "last_message_at": "datetime",
-  "status_history": [{"status", "changed_at", "notes"}],
-  "created_at": "datetime",
-  "updated_at": "datetime"
-}
-```
+## Tech Stack
+- **Frontend**: React 19, TailwindCSS, Phosphor Icons
+- **Backend**: FastAPI, Motor (MongoDB async driver)
+- **Fonts**: Chivo (headings), IBM Plex Sans (body)
+- **Colors**: Green primary (#22C55E), gray backgrounds
 
 ## Prioritized Backlog
 
 ### P0 (Done)
-- [x] WhatsApp webhook handling
-- [x] Message storage
-- [x] Agent CRUD
-- [x] Lead CRUD with auto-creation
-- [x] Lead assignment & status tracking
+- [x] WhatsApp API integration
+- [x] CRM with leads & agents
+- [x] Inbox UI with 3-panel layout
 
 ### P1 (Future)
-- [ ] Webhook signature verification (X-Hub-Signature-256)
-- [ ] Lead assignment rules (auto-assign based on round-robin)
-- [ ] Agent performance metrics
-- [ ] Lead scoring system
+- [ ] WebSocket for true real-time
+- [ ] Message read receipts
+- [ ] Quick reply templates
+- [ ] Agent performance dashboard
 
 ### P2 (Nice to have)
-- [ ] Email notifications on new leads
-- [ ] Lead follow-up reminders
-- [ ] Bulk lead import/export
-- [ ] Lead conversation history view
+- [ ] Mobile responsive design
+- [ ] Dark mode
+- [ ] Message search
+- [ ] File upload for media messages
 
 ## Next Tasks
 1. Configure real Meta WhatsApp credentials
-2. Add webhook signature verification for security
-3. Implement auto-assignment rules
+2. Test end-to-end message flow with real WhatsApp number
+3. Add WebSocket for instant message updates
