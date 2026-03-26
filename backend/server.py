@@ -23,7 +23,12 @@ from models import (
     VideoMessageRequest, TemplateMessageRequest, MessageResponse,
     StoredMessage, MessageListResponse,
     APIKeyCreate, APIKey, APIKeyResponse,
-    HealthCheck
+    HealthCheck,
+    # CRM Models
+    AgentCreate, AgentUpdate, Agent, AgentResponse, AgentListResponse,
+    LeadCreate, LeadUpdate, LeadAssign, LeadStatusUpdate,
+    Lead, LeadResponse, LeadListResponse, LeadStats,
+    LeadStatus, LeadSource
 )
 from whatsapp_service import WhatsAppService
 from auth import generate_api_key, hash_api_key, validate_api_key, api_key_header
@@ -550,6 +555,403 @@ async def get_message(message_id: str):
     return StoredMessage(**msg)
 
 
+# ============== CRM: Agent Management ==============
+
+@api_router.post("/agents", response_model=AgentResponse, dependencies=[Depends(verify_api_key)])
+async def create_agent(request: AgentCreate):
+    """Create a new agent"""
+    # Check if email already exists
+    existing = await db.agents.find_one({"email": request.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Agent with this email already exists")
+    
+    agent = Agent(
+        name=request.name,
+        email=request.email,
+        phone=request.phone,
+        department=request.department,
+        is_active=request.is_active
+    )
+    
+    doc = agent.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    
+    await db.agents.insert_one(doc)
+    logger.info(f"Created agent: {agent.name} ({agent.email})")
+    
+    return AgentResponse(**agent.model_dump())
+
+
+@api_router.get("/agents", response_model=AgentListResponse, dependencies=[Depends(verify_api_key)])
+async def list_agents(
+    department: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """List all agents with optional filters"""
+    query = {}
+    if department:
+        query["department"] = department
+    if is_active is not None:
+        query["is_active"] = is_active
+    
+    total = await db.agents.count_documents(query)
+    agents = await db.agents.find(query, {"_id": 0}).sort("name", 1).skip(offset).limit(limit).to_list(limit)
+    
+    result = []
+    for agent in agents:
+        if isinstance(agent.get('created_at'), str):
+            agent['created_at'] = datetime.fromisoformat(agent['created_at'])
+        if isinstance(agent.get('updated_at'), str):
+            agent['updated_at'] = datetime.fromisoformat(agent['updated_at'])
+        result.append(AgentResponse(**agent))
+    
+    return AgentListResponse(total=total, agents=result)
+
+
+@api_router.get("/agents/{agent_id}", response_model=AgentResponse, dependencies=[Depends(verify_api_key)])
+async def get_agent(agent_id: str):
+    """Get agent by ID"""
+    agent = await db.agents.find_one({"id": agent_id}, {"_id": 0})
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    if isinstance(agent.get('created_at'), str):
+        agent['created_at'] = datetime.fromisoformat(agent['created_at'])
+    if isinstance(agent.get('updated_at'), str):
+        agent['updated_at'] = datetime.fromisoformat(agent['updated_at'])
+    
+    return AgentResponse(**agent)
+
+
+@api_router.patch("/agents/{agent_id}", response_model=AgentResponse, dependencies=[Depends(verify_api_key)])
+async def update_agent(agent_id: str, request: AgentUpdate):
+    """Update an agent"""
+    agent = await db.agents.find_one({"id": agent_id}, {"_id": 0})
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    update_data = {k: v for k, v in request.model_dump().items() if v is not None}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Check email uniqueness if updating email
+    if "email" in update_data and update_data["email"] != agent.get("email"):
+        existing = await db.agents.find_one({"email": update_data["email"]}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already in use")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.agents.update_one({"id": agent_id}, {"$set": update_data})
+    
+    updated = await db.agents.find_one({"id": agent_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    
+    logger.info(f"Updated agent: {agent_id}")
+    return AgentResponse(**updated)
+
+
+@api_router.delete("/agents/{agent_id}", dependencies=[Depends(verify_api_key)])
+async def delete_agent(agent_id: str):
+    """Deactivate an agent"""
+    result = await db.agents.update_one(
+        {"id": agent_id},
+        {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Unassign leads from this agent
+    await db.leads.update_many(
+        {"assigned_agent_id": agent_id},
+        {"$set": {"assigned_agent_id": None, "assigned_agent_name": None, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    logger.info(f"Deactivated agent: {agent_id}")
+    return {"success": True, "message": "Agent deactivated"}
+
+
+# ============== CRM: Lead Management ==============
+
+@api_router.post("/leads", response_model=LeadResponse, dependencies=[Depends(verify_api_key)])
+async def create_lead(request: LeadCreate):
+    """Create a new lead manually"""
+    # Check if lead with same phone already exists
+    existing = await db.leads.find_one({"phone": request.phone}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Lead with this phone number already exists")
+    
+    lead = Lead(
+        name=request.name,
+        phone=request.phone,
+        email=request.email,
+        source=request.source,
+        status=request.status,
+        notes=request.notes,
+        tags=request.tags or [],
+        status_history=[{
+            "status": request.status.value,
+            "changed_at": datetime.now(timezone.utc).isoformat(),
+            "notes": "Lead created"
+        }]
+    )
+    
+    # Assign agent if provided
+    if request.assigned_agent_id:
+        agent = await db.agents.find_one({"id": request.assigned_agent_id, "is_active": True}, {"_id": 0})
+        if agent:
+            lead.assigned_agent_id = request.assigned_agent_id
+            lead.assigned_agent_name = agent["name"]
+            # Increment agent's lead count
+            await db.agents.update_one({"id": request.assigned_agent_id}, {"$inc": {"leads_count": 1}})
+    
+    doc = lead.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    if doc.get('last_message_at'):
+        doc['last_message_at'] = doc['last_message_at'].isoformat()
+    doc['source'] = doc['source'].value
+    doc['status'] = doc['status'].value
+    
+    await db.leads.insert_one(doc)
+    logger.info(f"Created lead: {lead.name} ({lead.phone})")
+    
+    return LeadResponse(**lead.model_dump())
+
+
+@api_router.get("/leads", response_model=LeadListResponse, dependencies=[Depends(verify_api_key)])
+async def list_leads(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    source: Optional[str] = Query(None, description="Filter by source"),
+    assigned_agent_id: Optional[str] = Query(None, description="Filter by assigned agent"),
+    unassigned: Optional[bool] = Query(None, description="Filter unassigned leads"),
+    search: Optional[str] = Query(None, description="Search by name or phone"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0)
+):
+    """List leads with filters"""
+    query = {}
+    
+    if status:
+        query["status"] = status
+    if source:
+        query["source"] = source
+    if assigned_agent_id:
+        query["assigned_agent_id"] = assigned_agent_id
+    if unassigned:
+        query["assigned_agent_id"] = None
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}}
+        ]
+    
+    total = await db.leads.count_documents(query)
+    leads = await db.leads.find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit).to_list(limit)
+    
+    result = []
+    for lead in leads:
+        if isinstance(lead.get('created_at'), str):
+            lead['created_at'] = datetime.fromisoformat(lead['created_at'])
+        if isinstance(lead.get('updated_at'), str):
+            lead['updated_at'] = datetime.fromisoformat(lead['updated_at'])
+        if isinstance(lead.get('last_message_at'), str):
+            lead['last_message_at'] = datetime.fromisoformat(lead['last_message_at'])
+        result.append(LeadResponse(**lead))
+    
+    return LeadListResponse(total=total, leads=result)
+
+
+@api_router.get("/leads/stats", response_model=LeadStats, dependencies=[Depends(verify_api_key)])
+async def get_lead_stats():
+    """Get lead statistics"""
+    total = await db.leads.count_documents({})
+    unassigned = await db.leads.count_documents({"assigned_agent_id": None})
+    
+    # Count by status
+    by_status = {}
+    for status in LeadStatus:
+        count = await db.leads.count_documents({"status": status.value})
+        by_status[status.value] = count
+    
+    # Count by source
+    by_source = {}
+    for source in LeadSource:
+        count = await db.leads.count_documents({"source": source.value})
+        by_source[source.value] = count
+    
+    return LeadStats(
+        total_leads=total,
+        by_status=by_status,
+        by_source=by_source,
+        unassigned_count=unassigned
+    )
+
+
+@api_router.get("/leads/{lead_id}", response_model=LeadResponse, dependencies=[Depends(verify_api_key)])
+async def get_lead(lead_id: str):
+    """Get lead by ID"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    if isinstance(lead.get('created_at'), str):
+        lead['created_at'] = datetime.fromisoformat(lead['created_at'])
+    if isinstance(lead.get('updated_at'), str):
+        lead['updated_at'] = datetime.fromisoformat(lead['updated_at'])
+    if isinstance(lead.get('last_message_at'), str):
+        lead['last_message_at'] = datetime.fromisoformat(lead['last_message_at'])
+    
+    return LeadResponse(**lead)
+
+
+@api_router.patch("/leads/{lead_id}", response_model=LeadResponse, dependencies=[Depends(verify_api_key)])
+async def update_lead(lead_id: str, request: LeadUpdate):
+    """Update a lead"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    update_data = {k: v for k, v in request.model_dump().items() if v is not None}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Convert enum values
+    if "status" in update_data:
+        update_data["status"] = update_data["status"].value
+    
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.leads.update_one({"id": lead_id}, {"$set": update_data})
+    
+    updated = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    if isinstance(updated.get('last_message_at'), str):
+        updated['last_message_at'] = datetime.fromisoformat(updated['last_message_at'])
+    
+    logger.info(f"Updated lead: {lead_id}")
+    return LeadResponse(**updated)
+
+
+@api_router.post("/leads/{lead_id}/assign", response_model=LeadResponse, dependencies=[Depends(verify_api_key)])
+async def assign_lead(lead_id: str, request: LeadAssign):
+    """Assign lead to an agent"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    agent = await db.agents.find_one({"id": request.agent_id, "is_active": True}, {"_id": 0})
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found or inactive")
+    
+    # Decrement old agent's count if was assigned
+    if lead.get("assigned_agent_id"):
+        await db.agents.update_one(
+            {"id": lead["assigned_agent_id"]},
+            {"$inc": {"leads_count": -1}}
+        )
+    
+    # Increment new agent's count
+    await db.agents.update_one({"id": request.agent_id}, {"$inc": {"leads_count": 1}})
+    
+    # Update lead
+    await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {
+            "assigned_agent_id": request.agent_id,
+            "assigned_agent_name": agent["name"],
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    updated = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    if isinstance(updated.get('last_message_at'), str):
+        updated['last_message_at'] = datetime.fromisoformat(updated['last_message_at'])
+    
+    logger.info(f"Assigned lead {lead_id} to agent {agent['name']}")
+    return LeadResponse(**updated)
+
+
+@api_router.post("/leads/{lead_id}/status", response_model=LeadResponse, dependencies=[Depends(verify_api_key)])
+async def update_lead_status(lead_id: str, request: LeadStatusUpdate):
+    """Update lead status"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    status_entry = {
+        "status": request.status.value,
+        "changed_at": datetime.now(timezone.utc).isoformat(),
+        "notes": request.notes
+    }
+    
+    await db.leads.update_one(
+        {"id": lead_id},
+        {
+            "$set": {
+                "status": request.status.value,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            },
+            "$push": {"status_history": status_entry}
+        }
+    )
+    
+    updated = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    if isinstance(updated.get('last_message_at'), str):
+        updated['last_message_at'] = datetime.fromisoformat(updated['last_message_at'])
+    
+    logger.info(f"Updated lead {lead_id} status to {request.status.value}")
+    return LeadResponse(**updated)
+
+
+@api_router.delete("/leads/{lead_id}", dependencies=[Depends(verify_api_key)])
+async def delete_lead(lead_id: str):
+    """Delete a lead"""
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    
+    # Decrement agent's count if was assigned
+    if lead.get("assigned_agent_id"):
+        await db.agents.update_one(
+            {"id": lead["assigned_agent_id"]},
+            {"$inc": {"leads_count": -1}}
+        )
+    
+    await db.leads.delete_one({"id": lead_id})
+    
+    logger.info(f"Deleted lead: {lead_id}")
+    return {"success": True, "message": "Lead deleted"}
+
+
 # ============== Webhook Endpoints ==============
 
 @webhook_router.get("/api/webhook/whatsapp")
@@ -632,7 +1034,7 @@ async def receive_webhook(request: Request):
 
 
 async def process_incoming_message(message: dict, metadata: dict, phone_number_id: str):
-    """Process and store incoming message"""
+    """Process and store incoming message, auto-create lead if new contact"""
     try:
         message_id = message.get("id")
         sender = message.get("from")
@@ -688,6 +1090,52 @@ async def process_incoming_message(message: dict, metadata: dict, phone_number_i
         await db.messages.insert_one(doc)
         
         logger.info(f"Stored incoming {message_type} message from {sender}")
+        
+        # ============== AUTO-CREATE LEAD ==============
+        # Check if lead already exists for this phone number
+        existing_lead = await db.leads.find_one({"phone": sender}, {"_id": 0})
+        
+        if existing_lead:
+            # Update existing lead with new message info
+            await db.leads.update_one(
+                {"phone": sender},
+                {
+                    "$inc": {"message_count": 1},
+                    "$set": {
+                        "last_message_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+            )
+            logger.info(f"Updated existing lead for {sender}")
+        else:
+            # Create new lead from incoming message
+            import uuid
+            lead = Lead(
+                id=str(uuid.uuid4()),
+                name=contact_name or f"WhatsApp User {sender[-4:]}",
+                phone=sender,
+                source=LeadSource.WHATSAPP,
+                status=LeadStatus.NEW,
+                first_message=content[:500] if content else None,
+                message_count=1,
+                last_message_at=datetime.now(timezone.utc),
+                status_history=[{
+                    "status": LeadStatus.NEW.value,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "notes": "Auto-created from incoming WhatsApp message"
+                }]
+            )
+            
+            lead_doc = lead.model_dump()
+            lead_doc['created_at'] = lead_doc['created_at'].isoformat()
+            lead_doc['updated_at'] = lead_doc['updated_at'].isoformat()
+            lead_doc['last_message_at'] = lead_doc['last_message_at'].isoformat()
+            lead_doc['source'] = lead_doc['source'].value
+            lead_doc['status'] = lead_doc['status'].value
+            
+            await db.leads.insert_one(lead_doc)
+            logger.info(f"Auto-created new lead for {sender}: {lead.name}")
     
     except Exception as e:
         logger.error(f"Error processing incoming message: {str(e)}", exc_info=True)
@@ -753,13 +1201,22 @@ async def startup():
     """Initialize on startup"""
     logger.info("WhatsApp Business API Service starting...")
     
-    # Create indexes
+    # Create indexes for messages
     await db.messages.create_index("wa_message_id")
     await db.messages.create_index("sender")
     await db.messages.create_index("recipient")
     await db.messages.create_index("created_at")
     await db.whatsapp_numbers.create_index("phone_number_id", unique=True)
     await db.api_keys.create_index("key", unique=True)
+    
+    # Create indexes for CRM
+    await db.agents.create_index("email", unique=True)
+    await db.agents.create_index("department")
+    await db.leads.create_index("phone", unique=True)
+    await db.leads.create_index("status")
+    await db.leads.create_index("source")
+    await db.leads.create_index("assigned_agent_id")
+    await db.leads.create_index("created_at")
     
     logger.info("Database indexes created")
 

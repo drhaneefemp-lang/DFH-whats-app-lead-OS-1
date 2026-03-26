@@ -1,10 +1,196 @@
 """
-Pydantic models for WhatsApp Business API service
+Pydantic models for WhatsApp Business API service and CRM
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime, timezone
+from enum import Enum
 import uuid
+
+
+# ============== CRM Enums ==============
+
+class LeadStatus(str, Enum):
+    """Lead status stages"""
+    NEW = "new"
+    CONTACTED = "contacted"
+    INTERESTED = "interested"
+    CONVERTED = "converted"
+    LOST = "lost"
+
+
+class LeadSource(str, Enum):
+    """Lead source channels"""
+    WHATSAPP = "whatsapp"
+    MANUAL = "manual"
+    WEBSITE = "website"
+    REFERRAL = "referral"
+    OTHER = "other"
+
+
+# ============== Agent Models ==============
+
+class AgentCreate(BaseModel):
+    """Request model for creating an agent"""
+    name: str = Field(..., min_length=1, max_length=100)
+    email: str = Field(..., description="Agent email address")
+    phone: Optional[str] = Field(None, description="Agent phone number")
+    department: str = Field(default="sales", description="Agent department")
+    is_active: bool = Field(default=True)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "John Smith",
+                "email": "john.smith@company.com",
+                "phone": "+15551234567",
+                "department": "sales"
+            }
+        }
+
+
+class AgentUpdate(BaseModel):
+    """Request model for updating an agent"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    department: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class Agent(BaseModel):
+    """Agent stored in database"""
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    email: str
+    phone: Optional[str] = None
+    department: str = "sales"
+    is_active: bool = True
+    leads_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class AgentResponse(BaseModel):
+    """Response model for agent"""
+    id: str
+    name: str
+    email: str
+    phone: Optional[str]
+    department: str
+    is_active: bool
+    leads_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentListResponse(BaseModel):
+    """Response for agent list"""
+    total: int
+    agents: List[AgentResponse]
+
+
+# ============== Lead Models ==============
+
+class LeadCreate(BaseModel):
+    """Request model for creating a lead manually"""
+    name: str = Field(..., min_length=1, max_length=200)
+    phone: str = Field(..., description="Lead phone number")
+    email: Optional[str] = None
+    source: LeadSource = Field(default=LeadSource.MANUAL)
+    status: LeadStatus = Field(default=LeadStatus.NEW)
+    assigned_agent_id: Optional[str] = Field(None, description="Agent ID to assign")
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "Jane Doe",
+                "phone": "+15559876543",
+                "email": "jane@example.com",
+                "source": "manual",
+                "notes": "Interested in premium plan"
+            }
+        }
+
+
+class LeadUpdate(BaseModel):
+    """Request model for updating a lead"""
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    email: Optional[str] = None
+    status: Optional[LeadStatus] = None
+    assigned_agent_id: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class LeadAssign(BaseModel):
+    """Request model for assigning lead to agent"""
+    agent_id: str = Field(..., description="Agent ID to assign")
+
+
+class LeadStatusUpdate(BaseModel):
+    """Request model for updating lead status"""
+    status: LeadStatus = Field(..., description="New status")
+    notes: Optional[str] = Field(None, description="Status change notes")
+
+
+class Lead(BaseModel):
+    """Lead stored in database"""
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    phone: str
+    email: Optional[str] = None
+    source: LeadSource = LeadSource.WHATSAPP
+    status: LeadStatus = LeadStatus.NEW
+    assigned_agent_id: Optional[str] = None
+    assigned_agent_name: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    first_message: Optional[str] = None
+    message_count: int = 0
+    last_message_at: Optional[datetime] = None
+    status_history: List[Dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class LeadResponse(BaseModel):
+    """Response model for lead"""
+    id: str
+    name: str
+    phone: str
+    email: Optional[str]
+    source: LeadSource
+    status: LeadStatus
+    assigned_agent_id: Optional[str]
+    assigned_agent_name: Optional[str]
+    notes: Optional[str]
+    tags: List[str]
+    first_message: Optional[str]
+    message_count: int
+    last_message_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+class LeadListResponse(BaseModel):
+    """Response for lead list"""
+    total: int
+    leads: List[LeadResponse]
+
+
+class LeadStats(BaseModel):
+    """Lead statistics"""
+    total_leads: int
+    by_status: Dict[str, int]
+    by_source: Dict[str, int]
+    unassigned_count: int
 
 
 # ============== WhatsApp Number Models ==============

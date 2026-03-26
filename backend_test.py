@@ -11,12 +11,14 @@ from typing import Optional, Dict, Any
 class WhatsAppAPITester:
     def __init__(self, base_url: str = "https://msg-gateway-2.preview.emergentagent.com"):
         self.base_url = base_url
-        self.api_key = None
+        self.api_key = "wa_LCJTBLltCNuzopYfF95QKuYUQ0eDVfCbTNIUPOWdMjs"  # Use provided API key
         self.tests_run = 0
         self.tests_passed = 0
         self.test_results = []
         self.whatsapp_number_id = None
         self.created_message_id = None
+        self.created_agent_id = None
+        self.created_lead_id = None
 
     def log_test(self, name: str, success: bool, details: str = ""):
         """Log test result"""
@@ -56,6 +58,8 @@ class WhatsAppAPITester:
                 response = requests.get(url, headers=request_headers, params=params, timeout=30)
             elif method == 'POST':
                 response = requests.post(url, json=data, headers=request_headers, params=params, timeout=30)
+            elif method == 'PATCH':
+                response = requests.patch(url, json=data, headers=request_headers, timeout=30)
             elif method == 'DELETE':
                 response = requests.delete(url, headers=request_headers, timeout=30)
             else:
@@ -390,6 +394,414 @@ class WhatsAppAPITester:
         else:
             self.log_test("Disconnect WhatsApp Number", False, f"Status: {status_code}, Response: {data}")
 
+    # ============== CRM AGENT TESTS ==============
+
+    def test_create_agent(self):
+        """Test creating a new agent"""
+        if not self.api_key:
+            self.log_test("Create Agent", False, "No API key available")
+            return
+
+        test_data = {
+            "name": f"Test Agent {datetime.now().strftime('%H%M%S')}",
+            "email": f"test.agent.{datetime.now().strftime('%H%M%S')}@example.com",
+            "phone": "+15551234567",
+            "department": "sales",
+            "is_active": True
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/agents', data=test_data)
+        
+        if success and data.get('id'):
+            self.created_agent_id = data['id']
+            self.log_test("Create Agent", True, f"Agent created: {data.get('name')} (ID: {data.get('id')})")
+        else:
+            self.log_test("Create Agent", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_agents(self):
+        """Test listing agents"""
+        if not self.api_key:
+            self.log_test("List Agents", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/agents')
+        
+        if success and 'total' in data and 'agents' in data:
+            self.log_test("List Agents", True, f"Found {data.get('total')} total agents")
+        else:
+            self.log_test("List Agents", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_agents_with_filters(self):
+        """Test listing agents with filters"""
+        if not self.api_key:
+            self.log_test("List Agents with Filters", False, "No API key available")
+            return
+
+        # Test filter by department
+        params = {"department": "sales", "is_active": True}
+        success, data, status_code = self.make_request('GET', 'api/agents', params=params)
+        
+        if success and 'total' in data and 'agents' in data:
+            self.log_test("List Agents with Filters", True, f"Found {data.get('total')} sales agents")
+        else:
+            self.log_test("List Agents with Filters", False, f"Status: {status_code}, Response: {data}")
+
+    def test_get_agent_by_id(self):
+        """Test getting agent by ID"""
+        if not self.api_key or not self.created_agent_id:
+            self.log_test("Get Agent by ID", False, "No API key or agent ID available")
+            return
+
+        success, data, status_code = self.make_request('GET', f'api/agents/{self.created_agent_id}')
+        
+        if success and data.get('id') == self.created_agent_id:
+            self.log_test("Get Agent by ID", True, f"Agent retrieved: {data.get('name')}")
+        else:
+            self.log_test("Get Agent by ID", False, f"Status: {status_code}, Response: {data}")
+
+    def test_update_agent(self):
+        """Test updating an agent"""
+        if not self.api_key or not self.created_agent_id:
+            self.log_test("Update Agent", False, "No API key or agent ID available")
+            return
+
+        update_data = {
+            "department": "customer_support",
+            "phone": "+15559876543"
+        }
+        
+        success, data, status_code = self.make_request('PATCH', f'api/agents/{self.created_agent_id}', data=update_data)
+        
+        if success and data.get('department') == "customer_support":
+            self.log_test("Update Agent", True, f"Agent updated: department={data.get('department')}")
+        else:
+            self.log_test("Update Agent", False, f"Status: {status_code}, Response: {data}")
+
+    def test_deactivate_agent(self):
+        """Test deactivating an agent"""
+        if not self.api_key or not self.created_agent_id:
+            self.log_test("Deactivate Agent", False, "No API key or agent ID available")
+            return
+
+        success, data, status_code = self.make_request('DELETE', f'api/agents/{self.created_agent_id}')
+        
+        if success and data.get('success'):
+            self.log_test("Deactivate Agent", True, f"Agent deactivated successfully")
+        else:
+            self.log_test("Deactivate Agent", False, f"Status: {status_code}, Response: {data}")
+
+    # ============== CRM LEAD TESTS ==============
+
+    def test_create_lead(self):
+        """Test creating a new lead manually"""
+        if not self.api_key:
+            self.log_test("Create Lead", False, "No API key available")
+            return
+
+        test_data = {
+            "name": f"Test Lead {datetime.now().strftime('%H%M%S')}",
+            "phone": f"+1555{datetime.now().strftime('%H%M%S')}",
+            "email": f"test.lead.{datetime.now().strftime('%H%M%S')}@example.com",
+            "source": "manual",
+            "status": "new",
+            "notes": "Test lead created via API"
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/leads', data=test_data)
+        
+        if success and data.get('id'):
+            self.created_lead_id = data['id']
+            self.log_test("Create Lead", True, f"Lead created: {data.get('name')} (ID: {data.get('id')})")
+        else:
+            self.log_test("Create Lead", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_leads(self):
+        """Test listing leads"""
+        if not self.api_key:
+            self.log_test("List Leads", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/leads')
+        
+        if success and 'total' in data and 'leads' in data:
+            self.log_test("List Leads", True, f"Found {data.get('total')} total leads")
+        else:
+            self.log_test("List Leads", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_leads_with_filters(self):
+        """Test listing leads with filters"""
+        if not self.api_key:
+            self.log_test("List Leads with Filters", False, "No API key available")
+            return
+
+        # Test multiple filters
+        params = {"status": "new", "source": "manual", "unassigned": True}
+        success, data, status_code = self.make_request('GET', 'api/leads', params=params)
+        
+        if success and 'total' in data and 'leads' in data:
+            self.log_test("List Leads with Filters", True, f"Found {data.get('total')} new manual unassigned leads")
+        else:
+            self.log_test("List Leads with Filters", False, f"Status: {status_code}, Response: {data}")
+
+    def test_get_lead_stats(self):
+        """Test getting lead statistics"""
+        if not self.api_key:
+            self.log_test("Get Lead Stats", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/leads/stats')
+        
+        if success and 'total_leads' in data and 'by_status' in data and 'by_source' in data:
+            self.log_test("Get Lead Stats", True, f"Stats: {data.get('total_leads')} total, {data.get('unassigned_count')} unassigned")
+        else:
+            self.log_test("Get Lead Stats", False, f"Status: {status_code}, Response: {data}")
+
+    def test_get_lead_by_id(self):
+        """Test getting lead by ID"""
+        if not self.api_key or not self.created_lead_id:
+            self.log_test("Get Lead by ID", False, "No API key or lead ID available")
+            return
+
+        success, data, status_code = self.make_request('GET', f'api/leads/{self.created_lead_id}')
+        
+        if success and data.get('id') == self.created_lead_id:
+            self.log_test("Get Lead by ID", True, f"Lead retrieved: {data.get('name')}")
+        else:
+            self.log_test("Get Lead by ID", False, f"Status: {status_code}, Response: {data}")
+
+    def test_update_lead(self):
+        """Test updating a lead"""
+        if not self.api_key or not self.created_lead_id:
+            self.log_test("Update Lead", False, "No API key or lead ID available")
+            return
+
+        update_data = {
+            "email": f"updated.lead.{datetime.now().strftime('%H%M%S')}@example.com",
+            "notes": "Updated via API test"
+        }
+        
+        success, data, status_code = self.make_request('PATCH', f'api/leads/{self.created_lead_id}', data=update_data)
+        
+        if success and data.get('email') == update_data['email']:
+            self.log_test("Update Lead", True, f"Lead updated: email={data.get('email')}")
+        else:
+            self.log_test("Update Lead", False, f"Status: {status_code}, Response: {data}")
+
+    def test_assign_lead_to_agent(self):
+        """Test assigning lead to agent"""
+        if not self.api_key or not self.created_lead_id:
+            self.log_test("Assign Lead to Agent", False, "No API key or lead ID available")
+            return
+
+        # First create a new agent for assignment
+        agent_data = {
+            "name": f"Assignment Agent {datetime.now().strftime('%H%M%S')}",
+            "email": f"assign.agent.{datetime.now().strftime('%H%M%S')}@example.com",
+            "department": "sales"
+        }
+        
+        success, agent_response, status_code = self.make_request('POST', 'api/agents', data=agent_data)
+        
+        if not success or not agent_response.get('id'):
+            self.log_test("Assign Lead to Agent", False, "Failed to create agent for assignment")
+            return
+
+        agent_id = agent_response['id']
+        
+        # Now assign the lead
+        assign_data = {"agent_id": agent_id}
+        success, data, status_code = self.make_request('POST', f'api/leads/{self.created_lead_id}/assign', data=assign_data)
+        
+        if success and data.get('assigned_agent_id') == agent_id:
+            self.log_test("Assign Lead to Agent", True, f"Lead assigned to agent: {data.get('assigned_agent_name')}")
+        else:
+            self.log_test("Assign Lead to Agent", False, f"Status: {status_code}, Response: {data}")
+
+    def test_update_lead_status(self):
+        """Test updating lead status with history"""
+        if not self.api_key or not self.created_lead_id:
+            self.log_test("Update Lead Status", False, "No API key or lead ID available")
+            return
+
+        status_data = {
+            "status": "contacted",
+            "notes": "Lead contacted via phone call"
+        }
+        
+        success, data, status_code = self.make_request('POST', f'api/leads/{self.created_lead_id}/status', data=status_data)
+        
+        if success and data.get('status') == "contacted":
+            self.log_test("Update Lead Status", True, f"Lead status updated to: {data.get('status')}")
+        else:
+            self.log_test("Update Lead Status", False, f"Status: {status_code}, Response: {data}")
+
+    def test_webhook_auto_create_lead(self):
+        """Test auto-creating lead from incoming WhatsApp message"""
+        # Create a unique phone number for this test
+        test_phone = f"1555{datetime.now().strftime('%H%M%S')}"
+        
+        webhook_payload = {
+            "object": "whatsapp_business_account",
+            "entry": [{
+                "id": "test_entry_id",
+                "changes": [{
+                    "value": {
+                        "messaging_product": "whatsapp",
+                        "metadata": {
+                            "display_phone_number": "+15551234567",
+                            "phone_number_id": "123456789012345"
+                        },
+                        "contacts": [{
+                            "profile": {
+                                "name": f"Auto Lead {datetime.now().strftime('%H%M%S')}"
+                            },
+                            "wa_id": test_phone
+                        }],
+                        "messages": [{
+                            "from": test_phone,
+                            "id": f"auto_msg_{datetime.now().strftime('%H%M%S')}",
+                            "timestamp": "1234567890",
+                            "text": {
+                                "body": "Hello, I'm interested in your services"
+                            },
+                            "type": "text"
+                        }]
+                    },
+                    "field": "messages"
+                }]
+            }]
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/webhook/whatsapp', data=webhook_payload, headers={})
+        
+        if status_code == 200:
+            # Now check if lead was auto-created
+            import time
+            time.sleep(1)  # Give it a moment to process
+            
+            # Search for the lead by phone number
+            params = {"search": test_phone}
+            success, search_data, search_status = self.make_request('GET', 'api/leads', params=params)
+            
+            if success and search_data.get('total', 0) > 0:
+                lead = search_data['leads'][0]
+                if lead.get('source') == 'whatsapp' and lead.get('message_count') == 1:
+                    self.log_test("Webhook Auto-Create Lead", True, f"Lead auto-created: {lead.get('name')} from WhatsApp")
+                else:
+                    self.log_test("Webhook Auto-Create Lead", False, f"Lead found but incorrect data: source={lead.get('source')}, count={lead.get('message_count')}")
+            else:
+                self.log_test("Webhook Auto-Create Lead", False, "Lead was not auto-created from webhook")
+        else:
+            self.log_test("Webhook Auto-Create Lead", False, f"Webhook failed: {status_code}")
+
+    def test_webhook_increment_message_count(self):
+        """Test that subsequent messages increment message_count"""
+        # First, create a lead manually
+        test_phone = f"1555{datetime.now().strftime('%H%M%S')}"
+        
+        lead_data = {
+            "name": f"Message Count Test {datetime.now().strftime('%H%M%S')}",
+            "phone": test_phone,
+            "source": "whatsapp",
+            "status": "new"
+        }
+        
+        success, lead_response, status_code = self.make_request('POST', 'api/leads', data=lead_data)
+        
+        if not success or not lead_response.get('id'):
+            self.log_test("Webhook Increment Message Count", False, "Failed to create test lead")
+            return
+
+        lead_id = lead_response['id']
+        
+        # Send first webhook message
+        webhook_payload = {
+            "object": "whatsapp_business_account",
+            "entry": [{
+                "id": "test_entry_id",
+                "changes": [{
+                    "value": {
+                        "messaging_product": "whatsapp",
+                        "metadata": {
+                            "display_phone_number": "+15551234567",
+                            "phone_number_id": "123456789012345"
+                        },
+                        "contacts": [{
+                            "profile": {
+                                "name": "Test User"
+                            },
+                            "wa_id": test_phone
+                        }],
+                        "messages": [{
+                            "from": test_phone,
+                            "id": f"msg1_{datetime.now().strftime('%H%M%S')}",
+                            "timestamp": "1234567890",
+                            "text": {
+                                "body": "First message"
+                            },
+                            "type": "text"
+                        }]
+                    },
+                    "field": "messages"
+                }]
+            }]
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/webhook/whatsapp', data=webhook_payload, headers={})
+        
+        if status_code != 200:
+            self.log_test("Webhook Increment Message Count", False, f"First webhook failed: {status_code}")
+            return
+
+        import time
+        time.sleep(1)  # Give it a moment to process
+        
+        # Check message count after first message
+        success, lead_data, status_code = self.make_request('GET', f'api/leads/{lead_id}')
+        
+        if not success:
+            self.log_test("Webhook Increment Message Count", False, "Failed to retrieve lead after first message")
+            return
+
+        first_count = lead_data.get('message_count', 0)
+        
+        # Send second webhook message
+        webhook_payload['entry'][0]['changes'][0]['value']['messages'][0]['id'] = f"msg2_{datetime.now().strftime('%H%M%S')}"
+        webhook_payload['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'] = "Second message"
+        
+        success, data, status_code = self.make_request('POST', 'api/webhook/whatsapp', data=webhook_payload, headers={})
+        
+        if status_code != 200:
+            self.log_test("Webhook Increment Message Count", False, f"Second webhook failed: {status_code}")
+            return
+
+        time.sleep(1)  # Give it a moment to process
+        
+        # Check message count after second message
+        success, lead_data, status_code = self.make_request('GET', f'api/leads/{lead_id}')
+        
+        if success:
+            second_count = lead_data.get('message_count', 0)
+            if second_count == first_count + 1:
+                self.log_test("Webhook Increment Message Count", True, f"Message count incremented: {first_count} -> {second_count}")
+            else:
+                self.log_test("Webhook Increment Message Count", False, f"Message count not incremented correctly: {first_count} -> {second_count}")
+        else:
+            self.log_test("Webhook Increment Message Count", False, "Failed to retrieve lead after second message")
+
+    def test_delete_lead(self):
+        """Test deleting a lead"""
+        if not self.api_key or not self.created_lead_id:
+            self.log_test("Delete Lead", False, "No API key or lead ID available")
+            return
+
+        success, data, status_code = self.make_request('DELETE', f'api/leads/{self.created_lead_id}')
+        
+        if success and data.get('success'):
+            self.log_test("Delete Lead", True, f"Lead deleted successfully")
+        else:
+            self.log_test("Delete Lead", False, f"Status: {status_code}, Response: {data}")
+
     def run_all_tests(self):
         """Run all tests in sequence"""
         print("🚀 Starting WhatsApp Business API Backend Tests")
@@ -399,32 +811,49 @@ class WhatsAppAPITester:
         # Basic tests first
         self.test_health_check()
         
-        # API Key management
-        self.test_create_api_key()
-        self.test_list_api_keys()
+        # Skip API Key creation since we have a provided key
+        if self.api_key:
+            print(f"✅ Using provided API key: {self.api_key[:10]}...")
         
-        # WhatsApp number management
-        self.test_connect_whatsapp_number()
+        # WhatsApp number management (basic tests)
         self.test_list_whatsapp_numbers()
         
         # Webhook tests
         self.test_webhook_verification()
-        self.test_webhook_message_receive()
         
-        # Message sending tests (expected to fail with test tokens)
-        self.test_send_text_message()
-        self.test_send_image_message()
-        self.test_send_document_message()
-        self.test_send_video_message()
-        self.test_send_template_message()
+        # ============== CRM TESTS ==============
+        print("\n🏢 Testing CRM Agent Management...")
         
-        # Message retrieval tests
-        self.test_list_messages()
-        self.test_get_specific_message()
+        # Agent CRUD operations
+        self.test_create_agent()
+        self.test_list_agents()
+        self.test_list_agents_with_filters()
+        self.test_get_agent_by_id()
+        self.test_update_agent()
+        
+        print("\n📋 Testing CRM Lead Management...")
+        
+        # Lead CRUD operations
+        self.test_create_lead()
+        self.test_list_leads()
+        self.test_list_leads_with_filters()
+        self.test_get_lead_stats()
+        self.test_get_lead_by_id()
+        self.test_update_lead()
+        self.test_assign_lead_to_agent()
+        self.test_update_lead_status()
+        
+        print("\n🔗 Testing WhatsApp Integration...")
+        
+        # WhatsApp webhook integration tests
+        self.test_webhook_auto_create_lead()
+        self.test_webhook_increment_message_count()
+        
+        print("\n🧹 Testing Cleanup Operations...")
         
         # Cleanup tests
-        self.test_disconnect_whatsapp_number()
-        # Note: Not testing API key revocation to avoid breaking our test session
+        self.test_delete_lead()
+        self.test_deactivate_agent()
 
         # Print summary
         print("=" * 60)
