@@ -637,7 +637,6 @@ async def process_incoming_message(message: dict, metadata: dict, phone_number_i
         message_id = message.get("id")
         sender = message.get("from")
         message_type = message.get("type")
-        timestamp = message.get("timestamp")
         
         # Get contact name
         contacts = metadata.get("contacts", [])
@@ -699,8 +698,6 @@ async def process_status_update(status: dict):
     try:
         message_id = status.get("id")
         new_status = status.get("status")
-        timestamp = status.get("timestamp")
-        recipient = status.get("recipient_id")
         
         # Handle errors
         error_code = None
