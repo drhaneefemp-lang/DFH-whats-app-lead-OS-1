@@ -1,0 +1,114 @@
+{
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "domain": "Dashboard / CRM Inbox",
+  "typography": {
+    "headings": {
+      "fontFamily": "'Chivo', sans-serif",
+      "weights": ["400", "700", "900"],
+      "tracking": "tracking-tight"
+    },
+    "body": {
+      "fontFamily": "'IBM Plex Sans', sans-serif",
+      "weights": ["400", "500"]
+    }
+  },
+  "colors": {
+    "background": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "border": "#E5E7EB",
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#52525B"
+    },
+    "primary": "#22C55E",
+    "primaryForeground": "#FFFFFF",
+    "danger": "#EF4444"
+  },
+  "spacing_and_layout": {
+    "strategy": "MODE B: THE CONTROL ROOM GRID",
+    "container": "w-full h-screen grid grid-cols-1 lg:grid-cols-4 border-collapse overflow-hidden",
+    "columns": [
+      {
+        "name": "Conversation List Panel",
+        "span": "col-span-1",
+        "styles": "border-r border-gray-200 bg-gray-50 flex flex-col h-full overflow-hidden"
+      },
+      {
+        "name": "Chat Message Interface",
+        "span": "col-span-2",
+        "styles": "border-r border-gray-200 bg-white flex flex-col h-full overflow-hidden"
+      },
+      {
+        "name": "Lead Details Sidebar",
+        "span": "col-span-1",
+        "styles": "bg-gray-50 flex flex-col h-full overflow-y-auto"
+      }
+    ],
+    "borderRadius": "rounded-none or rounded-sm (max 4px)",
+    "shadows": "None. Use 1px solid strokes for boundaries."
+  },
+  "components": {
+    "ChatBubble": {
+      "style": "Rectangular, sharp edges. Left aligned (gray-100 bg) for incoming. Right aligned (green-500 bg, white text) for outgoing.",
+      "padding": "px-4 py-3",
+      "spacing": "mb-4"
+    },
+    "ConversationListItem": {
+      "style": "p-4 border-b border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors duration-200",
+      "activeStyle": "bg-white border-l-2 border-l-green-500",
+      "inactiveStyle": "border-l-2 border-l-transparent"
+    },
+    "MessageInput": {
+      "style": "p-4 border-t border-gray-200 bg-white flex items-end gap-2",
+      "input": "w-full resize-none p-3 border border-gray-300 rounded-sm focus:outline-none focus:ring-1 focus:ring-green-500 focus:border-green-500",
+      "button": "bg-green-500 hover:bg-green-600 text-white rounded-sm px-6 py-3 font-medium transition-colors"
+    },
+    "Tag": {
+      "style": "px-2 py-1 bg-gray-200 text-gray-800 text-xs font-bold uppercase tracking-[0.1em] rounded-sm"
+    }
+  },
+  "icons": {
+    "library": "@phosphor-icons/react",
+    "installation": "yarn add @phosphor-icons/react",
+    "usage": "Use Phosphor Icons (Regular or Bold weight) for high-density dashboard actions."
+  },
+  "media": {
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDQzOTc2Mnww&ixlib=rb-4.1.0&q=85",
+        "description": "Male lead avatar"
+      },
+      {
+        "url": "https://images.pexels.com/photos/30004324/pexels-photo-30004324.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Female lead avatar"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3NDQzOTc2Mnww&ixlib=rb-4.1.0&q=85",
+        "description": "Agent avatar"
+      }
+    ]
+  },
+  "testing": {
+    "attributes": [
+      "data-testid=\"conversation-list-panel\"",
+      "data-testid=\"chat-message-interface\"",
+      "data-testid=\"lead-details-sidebar\"",
+      "data-testid=\"agent-assignment-dropdown\"",
+      "data-testid=\"tag-management\"",
+      "data-testid=\"whatsapp-number-filter\"",
+      "data-testid=\"message-input\"",
+      "data-testid=\"send-button\"",
+      "data-testid=\"lead-status-update\""
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Do not use Space Grotesk. Import Chivo and IBM Plex Sans via Google Fonts.",
+    "Do not use Shadcn Card component. Use cardless, dense HTML divs with solid 1px borders.",
+    "Implement polling for real-time updates for chat messages.",
+    "Make the layout full viewport height (h-screen) without whole page scrolling; only the conversation list and chat history should scroll internally (overflow-y-auto).",
+    "Use data-testid extensively on all interactive elements as defined.",
+    "Stick to the 'Grid Borders' micro-theme: Expose the skeleton, 1px borders everywhere, zero soft shadows.",
+    "Ensure the green used is accessible, adjusting text-shadow or text color if necessary to meet APCA contrast standards."
+  ]
+}
