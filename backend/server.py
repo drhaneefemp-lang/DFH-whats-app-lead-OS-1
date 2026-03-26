@@ -4,6 +4,7 @@ WhatsApp Business API Backend Service
 - Handle webhook events for incoming messages
 - Store message data in MongoDB
 - Support message sending via API
+- Automation engine with rule-based triggers
 """
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query
 from fastapi.security import APIKeyHeader
@@ -30,8 +31,16 @@ from models import (
     Lead, LeadResponse, LeadListResponse, LeadStats,
     LeadStatus, LeadSource
 )
+from automation_models import (
+    AutomationRuleCreate, AutomationRuleUpdate, AutomationRule,
+    AutomationRuleResponse, AutomationRuleListResponse,
+    ExecutionLogResponse, ExecutionLogListResponse,
+    TriggerType, ActionType
+)
 from whatsapp_service import WhatsAppService
 from auth import generate_api_key, hash_api_key, validate_api_key, api_key_header
+from automation_engine import AutomationEngine
+from automation_scheduler import get_scheduler
 
 # Load environment
 ROOT_DIR = Path(__file__).parent
@@ -62,6 +71,10 @@ app = FastAPI(
 # Create routers
 api_router = APIRouter(prefix="/api")
 webhook_router = APIRouter()
+
+# Initialize automation engine
+automation_engine = AutomationEngine(db)
+scheduler = get_scheduler(db)
 
 
 # ============== Dependencies ==============
@@ -952,6 +965,222 @@ async def delete_lead(lead_id: str):
     return {"success": True, "message": "Lead deleted"}
 
 
+# ============== Automation Rules API ==============
+
+@api_router.post("/automation/rules", response_model=AutomationRuleResponse, dependencies=[Depends(verify_api_key)])
+async def create_automation_rule(request: AutomationRuleCreate):
+    """Create a new automation rule"""
+    rule = AutomationRule(
+        name=request.name,
+        description=request.description,
+        trigger_type=request.trigger_type,
+        trigger_config=request.trigger_config,
+        conditions=request.conditions,
+        actions=request.actions,
+        is_active=request.is_active,
+        priority=request.priority
+    )
+    
+    doc = rule.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    doc['updated_at'] = doc['updated_at'].isoformat()
+    doc['trigger_type'] = doc['trigger_type'].value
+    if doc.get('last_executed_at'):
+        doc['last_executed_at'] = doc['last_executed_at'].isoformat()
+    
+    # Convert nested enums
+    for action in doc['actions']:
+        action['action_type'] = action['action_type'].value
+    
+    await db.automation_rules.insert_one(doc)
+    logger.info(f"Created automation rule: {rule.name}")
+    
+    return AutomationRuleResponse(**rule.model_dump())
+
+
+@api_router.get("/automation/rules", response_model=AutomationRuleListResponse, dependencies=[Depends(verify_api_key)])
+async def list_automation_rules(
+    trigger_type: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """List automation rules with optional filters"""
+    query = {}
+    if trigger_type:
+        query["trigger_type"] = trigger_type
+    if is_active is not None:
+        query["is_active"] = is_active
+    
+    total = await db.automation_rules.count_documents(query)
+    rules = await db.automation_rules.find(query, {"_id": 0}).sort("priority", -1).skip(offset).limit(limit).to_list(limit)
+    
+    result = []
+    for rule in rules:
+        if isinstance(rule.get('created_at'), str):
+            rule['created_at'] = datetime.fromisoformat(rule['created_at'])
+        if isinstance(rule.get('updated_at'), str):
+            rule['updated_at'] = datetime.fromisoformat(rule['updated_at'])
+        if isinstance(rule.get('last_executed_at'), str):
+            rule['last_executed_at'] = datetime.fromisoformat(rule['last_executed_at'])
+        result.append(AutomationRuleResponse(**rule))
+    
+    return AutomationRuleListResponse(total=total, rules=result)
+
+
+@api_router.get("/automation/rules/{rule_id}", response_model=AutomationRuleResponse, dependencies=[Depends(verify_api_key)])
+async def get_automation_rule(rule_id: str):
+    """Get automation rule by ID"""
+    rule = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
+    if isinstance(rule.get('created_at'), str):
+        rule['created_at'] = datetime.fromisoformat(rule['created_at'])
+    if isinstance(rule.get('updated_at'), str):
+        rule['updated_at'] = datetime.fromisoformat(rule['updated_at'])
+    if isinstance(rule.get('last_executed_at'), str):
+        rule['last_executed_at'] = datetime.fromisoformat(rule['last_executed_at'])
+    
+    return AutomationRuleResponse(**rule)
+
+
+@api_router.patch("/automation/rules/{rule_id}", response_model=AutomationRuleResponse, dependencies=[Depends(verify_api_key)])
+async def update_automation_rule(rule_id: str, request: AutomationRuleUpdate):
+    """Update an automation rule"""
+    rule = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
+    update_data = {k: v for k, v in request.model_dump().items() if v is not None}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Convert enums
+    if "trigger_type" in update_data:
+        update_data["trigger_type"] = update_data["trigger_type"].value
+    if "actions" in update_data:
+        for action in update_data["actions"]:
+            if hasattr(action.get("action_type"), "value"):
+                action["action_type"] = action["action_type"].value
+    
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.automation_rules.update_one({"id": rule_id}, {"$set": update_data})
+    
+    updated = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    if isinstance(updated.get('last_executed_at'), str):
+        updated['last_executed_at'] = datetime.fromisoformat(updated['last_executed_at'])
+    
+    logger.info(f"Updated automation rule: {rule_id}")
+    return AutomationRuleResponse(**updated)
+
+
+@api_router.delete("/automation/rules/{rule_id}", dependencies=[Depends(verify_api_key)])
+async def delete_automation_rule(rule_id: str):
+    """Delete an automation rule"""
+    result = await db.automation_rules.delete_one({"id": rule_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
+    logger.info(f"Deleted automation rule: {rule_id}")
+    return {"success": True, "message": "Rule deleted"}
+
+
+@api_router.post("/automation/rules/{rule_id}/toggle", response_model=AutomationRuleResponse, dependencies=[Depends(verify_api_key)])
+async def toggle_automation_rule(rule_id: str):
+    """Toggle automation rule active status"""
+    rule = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    
+    new_status = not rule.get("is_active", True)
+    
+    await db.automation_rules.update_one(
+        {"id": rule_id},
+        {"$set": {
+            "is_active": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    updated = await db.automation_rules.find_one({"id": rule_id}, {"_id": 0})
+    if isinstance(updated.get('created_at'), str):
+        updated['created_at'] = datetime.fromisoformat(updated['created_at'])
+    if isinstance(updated.get('updated_at'), str):
+        updated['updated_at'] = datetime.fromisoformat(updated['updated_at'])
+    if isinstance(updated.get('last_executed_at'), str):
+        updated['last_executed_at'] = datetime.fromisoformat(updated['last_executed_at'])
+    
+    return AutomationRuleResponse(**updated)
+
+
+@api_router.get("/automation/logs", response_model=ExecutionLogListResponse, dependencies=[Depends(verify_api_key)])
+async def list_execution_logs(
+    rule_id: Optional[str] = Query(None),
+    success: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0)
+):
+    """List automation execution logs"""
+    query = {}
+    if rule_id:
+        query["rule_id"] = rule_id
+    if success is not None:
+        query["success"] = success
+    
+    total = await db.automation_logs.count_documents(query)
+    logs = await db.automation_logs.find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit).to_list(limit)
+    
+    result = []
+    for log in logs:
+        if isinstance(log.get('created_at'), str):
+            log['created_at'] = datetime.fromisoformat(log['created_at'])
+        result.append(ExecutionLogResponse(**log))
+    
+    return ExecutionLogListResponse(total=total, logs=result)
+
+
+@api_router.get("/automation/triggers", dependencies=[Depends(verify_api_key)])
+async def list_trigger_types():
+    """List available trigger types"""
+    return {
+        "triggers": [
+            {"value": t.value, "label": t.value.replace("_", " ").title()}
+            for t in TriggerType
+        ]
+    }
+
+
+@api_router.get("/automation/actions", dependencies=[Depends(verify_api_key)])
+async def list_action_types():
+    """List available action types"""
+    return {
+        "actions": [
+            {"value": a.value, "label": a.value.replace("_", " ").title()}
+            for a in ActionType
+        ]
+    }
+
+
+@api_router.get("/automation/scheduler/status", dependencies=[Depends(verify_api_key)])
+async def get_scheduler_status():
+    """Get scheduler status and jobs"""
+    return {
+        "running": scheduler._started,
+        "jobs": scheduler.get_jobs()
+    }
+
+
 # ============== Webhook Endpoints ==============
 
 @webhook_router.get("/api/webhook/whatsapp")
@@ -1034,7 +1263,7 @@ async def receive_webhook(request: Request):
 
 
 async def process_incoming_message(message: dict, metadata: dict, phone_number_id: str):
-    """Process and store incoming message, auto-create lead if new contact"""
+    """Process and store incoming message, auto-create lead if new contact, trigger automations"""
     try:
         message_id = message.get("id")
         sender = message.get("from")
@@ -1094,6 +1323,8 @@ async def process_incoming_message(message: dict, metadata: dict, phone_number_i
         # ============== AUTO-CREATE LEAD ==============
         # Check if lead already exists for this phone number
         existing_lead = await db.leads.find_one({"phone": sender}, {"_id": 0})
+        is_new_lead = False
+        lead_data = None
         
         if existing_lead:
             # Update existing lead with new message info
@@ -1107,6 +1338,7 @@ async def process_incoming_message(message: dict, metadata: dict, phone_number_i
                     }
                 }
             )
+            lead_data = await db.leads.find_one({"phone": sender}, {"_id": 0})
             logger.info(f"Updated existing lead for {sender}")
         else:
             # Create new lead from incoming message
@@ -1135,7 +1367,54 @@ async def process_incoming_message(message: dict, metadata: dict, phone_number_i
             lead_doc['status'] = lead_doc['status'].value
             
             await db.leads.insert_one(lead_doc)
+            lead_data = lead_doc
+            is_new_lead = True
             logger.info(f"Auto-created new lead for {sender}: {lead.name}")
+        
+        # ============== TRIGGER AUTOMATION RULES ==============
+        try:
+            # Get WhatsApp service for sending messages
+            wa_number = await db.whatsapp_numbers.find_one(
+                {"phone_number_id": phone_number_id, "is_active": True}, 
+                {"_id": 0}
+            )
+            
+            whatsapp_service = None
+            if wa_number:
+                whatsapp_service = WhatsAppService(
+                    phone_number_id=wa_number["phone_number_id"],
+                    access_token=wa_number["access_token"]
+                )
+            
+            # Automation context
+            context = {
+                "phone": sender,
+                "lead": lead_data,
+                "message": {
+                    "id": message_id,
+                    "type": message_type,
+                    "content": content
+                },
+                "contact_name": contact_name
+            }
+            
+            # Trigger NEW_MESSAGE rules
+            await automation_engine.process_trigger(
+                TriggerType.NEW_MESSAGE, 
+                context, 
+                whatsapp_service
+            )
+            
+            # Trigger NEW_LEAD rules if this is a new lead
+            if is_new_lead:
+                await automation_engine.process_trigger(
+                    TriggerType.NEW_LEAD, 
+                    context, 
+                    whatsapp_service
+                )
+        
+        except Exception as auto_error:
+            logger.error(f"Error triggering automation: {auto_error}", exc_info=True)
     
     except Exception as e:
         logger.error(f"Error processing incoming message: {str(e)}", exc_info=True)
@@ -1218,11 +1497,24 @@ async def startup():
     await db.leads.create_index("assigned_agent_id")
     await db.leads.create_index("created_at")
     
+    # Create indexes for automation
+    await db.automation_rules.create_index("trigger_type")
+    await db.automation_rules.create_index("is_active")
+    await db.automation_logs.create_index("rule_id")
+    await db.automation_logs.create_index("created_at")
+    await db.scheduled_tasks.create_index("scheduled_at")
+    await db.scheduled_tasks.create_index("executed")
+    
     logger.info("Database indexes created")
+    
+    # Start automation scheduler
+    scheduler.start()
+    logger.info("Automation scheduler started")
 
 
 @app.on_event("shutdown")
 async def shutdown():
     """Cleanup on shutdown"""
     logger.info("WhatsApp Business API Service shutting down...")
+    scheduler.stop()
     client.close()

@@ -802,6 +802,297 @@ class WhatsAppAPITester:
         else:
             self.log_test("Delete Lead", False, f"Status: {status_code}, Response: {data}")
 
+    # ============== AUTOMATION ENGINE TESTS ==============
+
+    def test_list_trigger_types(self):
+        """Test GET /api/automation/triggers - List available trigger types"""
+        if not self.api_key:
+            self.log_test("List Trigger Types", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/automation/triggers')
+        
+        if success and 'triggers' in data and isinstance(data['triggers'], list):
+            triggers = data['triggers']
+            expected_triggers = ['new_message', 'new_lead', 'no_reply', 'lead_status_change', 'scheduled']
+            found_triggers = [t.get('value') for t in triggers]
+            
+            if all(trigger in found_triggers for trigger in expected_triggers):
+                self.log_test("List Trigger Types", True, f"Found {len(triggers)} trigger types: {found_triggers}")
+            else:
+                self.log_test("List Trigger Types", False, f"Missing expected triggers. Found: {found_triggers}")
+        else:
+            self.log_test("List Trigger Types", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_action_types(self):
+        """Test GET /api/automation/actions - List available action types"""
+        if not self.api_key:
+            self.log_test("List Action Types", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/automation/actions')
+        
+        if success and 'actions' in data and isinstance(data['actions'], list):
+            actions = data['actions']
+            expected_actions = ['send_message', 'assign_lead', 'update_status', 'add_tag', 'send_template']
+            found_actions = [a.get('value') for a in actions]
+            
+            if all(action in found_actions for action in expected_actions):
+                self.log_test("List Action Types", True, f"Found {len(actions)} action types: {found_actions}")
+            else:
+                self.log_test("List Action Types", False, f"Missing expected actions. Found: {found_actions}")
+        else:
+            self.log_test("List Action Types", False, f"Status: {status_code}, Response: {data}")
+
+    def test_create_automation_rule(self):
+        """Test POST /api/automation/rules - Create automation rule"""
+        if not self.api_key:
+            self.log_test("Create Automation Rule", False, "No API key available")
+            return
+
+        rule_data = {
+            "name": f"Test Welcome Rule {datetime.now().strftime('%H%M%S')}",
+            "description": "Test rule for new leads",
+            "trigger_type": "new_lead",
+            "trigger_config": {},
+            "conditions": [],
+            "actions": [{
+                "action_type": "send_message",
+                "config": {
+                    "message_text": "Welcome! Thanks for reaching out to us."
+                },
+                "delay_minutes": 0
+            }],
+            "is_active": True,
+            "priority": 1
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/automation/rules', data=rule_data)
+        
+        if success and data.get('id'):
+            self.created_rule_id = data['id']
+            self.log_test("Create Automation Rule", True, f"Rule created: {data.get('name')} (ID: {data.get('id')})")
+        else:
+            self.log_test("Create Automation Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_automation_rules(self):
+        """Test GET /api/automation/rules - List all rules"""
+        if not self.api_key:
+            self.log_test("List Automation Rules", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/automation/rules')
+        
+        if success and 'total' in data and 'rules' in data:
+            self.log_test("List Automation Rules", True, f"Found {data.get('total')} automation rules")
+        else:
+            self.log_test("List Automation Rules", False, f"Status: {status_code}, Response: {data}")
+
+    def test_get_automation_rule_by_id(self):
+        """Test GET /api/automation/rules/{id} - Get specific rule"""
+        if not self.api_key or not hasattr(self, 'created_rule_id'):
+            self.log_test("Get Automation Rule by ID", False, "No API key or rule ID available")
+            return
+
+        success, data, status_code = self.make_request('GET', f'api/automation/rules/{self.created_rule_id}')
+        
+        if success and data.get('id') == self.created_rule_id:
+            self.log_test("Get Automation Rule by ID", True, f"Rule retrieved: {data.get('name')}")
+        else:
+            self.log_test("Get Automation Rule by ID", False, f"Status: {status_code}, Response: {data}")
+
+    def test_update_automation_rule(self):
+        """Test PATCH /api/automation/rules/{id} - Update rule"""
+        if not self.api_key or not hasattr(self, 'created_rule_id'):
+            self.log_test("Update Automation Rule", False, "No API key or rule ID available")
+            return
+
+        update_data = {
+            "description": "Updated test rule description",
+            "priority": 5
+        }
+        
+        success, data, status_code = self.make_request('PATCH', f'api/automation/rules/{self.created_rule_id}', data=update_data)
+        
+        if success and data.get('priority') == 5:
+            self.log_test("Update Automation Rule", True, f"Rule updated: priority={data.get('priority')}")
+        else:
+            self.log_test("Update Automation Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_toggle_automation_rule(self):
+        """Test POST /api/automation/rules/{id}/toggle - Toggle rule active status"""
+        if not self.api_key or not hasattr(self, 'created_rule_id'):
+            self.log_test("Toggle Automation Rule", False, "No API key or rule ID available")
+            return
+
+        # First get current status
+        success, rule_data, status_code = self.make_request('GET', f'api/automation/rules/{self.created_rule_id}')
+        if not success:
+            self.log_test("Toggle Automation Rule", False, "Failed to get current rule status")
+            return
+
+        original_status = rule_data.get('is_active', True)
+        
+        # Toggle the rule
+        success, data, status_code = self.make_request('POST', f'api/automation/rules/{self.created_rule_id}/toggle')
+        
+        if success and data.get('is_active') != original_status:
+            self.log_test("Toggle Automation Rule", True, f"Rule toggled: {original_status} -> {data.get('is_active')}")
+        else:
+            self.log_test("Toggle Automation Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_create_no_reply_rule(self):
+        """Test creating a no_reply automation rule with trigger config"""
+        if not self.api_key:
+            self.log_test("Create No Reply Rule", False, "No API key available")
+            return
+
+        rule_data = {
+            "name": f"No Reply Follow-up {datetime.now().strftime('%H%M%S')}",
+            "description": "Send follow-up after 24 hours of no reply",
+            "trigger_type": "no_reply",
+            "trigger_config": {
+                "hours": 24
+            },
+            "conditions": [],
+            "actions": [{
+                "action_type": "send_message",
+                "config": {
+                    "message_text": "Hi! Just following up on your inquiry. How can we help you?"
+                },
+                "delay_minutes": 0
+            }],
+            "is_active": True,
+            "priority": 2
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/automation/rules', data=rule_data)
+        
+        if success and data.get('id') and data.get('trigger_config', {}).get('hours') == 24:
+            self.created_no_reply_rule_id = data['id']
+            self.log_test("Create No Reply Rule", True, f"No reply rule created: {data.get('name')}")
+        else:
+            self.log_test("Create No Reply Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_create_assign_lead_rule(self):
+        """Test creating a rule with assign_lead action"""
+        if not self.api_key:
+            self.log_test("Create Assign Lead Rule", False, "No API key available")
+            return
+
+        rule_data = {
+            "name": f"Auto Assign New Leads {datetime.now().strftime('%H%M%S')}",
+            "description": "Automatically assign new leads using round robin",
+            "trigger_type": "new_lead",
+            "trigger_config": {},
+            "conditions": [],
+            "actions": [{
+                "action_type": "assign_lead",
+                "config": {
+                    "assignment_strategy": "round_robin"
+                },
+                "delay_minutes": 0
+            }],
+            "is_active": True,
+            "priority": 3
+        }
+        
+        success, data, status_code = self.make_request('POST', 'api/automation/rules', data=rule_data)
+        
+        if success and data.get('id'):
+            self.created_assign_rule_id = data['id']
+            self.log_test("Create Assign Lead Rule", True, f"Assign rule created: {data.get('name')}")
+        else:
+            self.log_test("Create Assign Lead Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_execution_logs(self):
+        """Test GET /api/automation/logs - List execution logs"""
+        if not self.api_key:
+            self.log_test("List Execution Logs", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/automation/logs')
+        
+        if success and 'total' in data and 'logs' in data:
+            self.log_test("List Execution Logs", True, f"Found {data.get('total')} execution logs")
+        else:
+            self.log_test("List Execution Logs", False, f"Status: {status_code}, Response: {data}")
+
+    def test_list_execution_logs_with_filters(self):
+        """Test execution logs with rule_id filter"""
+        if not self.api_key or not hasattr(self, 'created_rule_id'):
+            self.log_test("List Execution Logs with Filters", False, "No API key or rule ID available")
+            return
+
+        params = {"rule_id": self.created_rule_id, "limit": 10}
+        success, data, status_code = self.make_request('GET', 'api/automation/logs', params=params)
+        
+        if success and 'total' in data and 'logs' in data:
+            self.log_test("List Execution Logs with Filters", True, f"Found {data.get('total')} logs for rule {self.created_rule_id}")
+        else:
+            self.log_test("List Execution Logs with Filters", False, f"Status: {status_code}, Response: {data}")
+
+    def test_scheduler_status(self):
+        """Test GET /api/automation/scheduler/status - Check scheduler status and jobs"""
+        if not self.api_key:
+            self.log_test("Scheduler Status", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/automation/scheduler/status')
+        
+        if success and 'running' in data and 'jobs' in data:
+            running = data.get('running')
+            jobs = data.get('jobs', [])
+            expected_jobs = ['check_no_reply', 'execute_scheduled_tasks', 'run_cron_rules']
+            
+            job_ids = [job.get('id') for job in jobs if isinstance(job, dict)]
+            
+            if running and all(job_id in job_ids for job_id in expected_jobs):
+                self.log_test("Scheduler Status", True, f"Scheduler running: {running}, Jobs: {len(jobs)}")
+            else:
+                self.log_test("Scheduler Status", False, f"Scheduler issues - Running: {running}, Jobs: {job_ids}")
+        else:
+            self.log_test("Scheduler Status", False, f"Status: {status_code}, Response: {data}")
+
+    def test_delete_automation_rule(self):
+        """Test DELETE /api/automation/rules/{id} - Delete rule"""
+        if not self.api_key or not hasattr(self, 'created_rule_id'):
+            self.log_test("Delete Automation Rule", False, "No API key or rule ID available")
+            return
+
+        success, data, status_code = self.make_request('DELETE', f'api/automation/rules/{self.created_rule_id}')
+        
+        if success and data.get('success'):
+            self.log_test("Delete Automation Rule", True, f"Rule deleted successfully")
+        else:
+            self.log_test("Delete Automation Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_delete_no_reply_rule(self):
+        """Test deleting the no reply rule"""
+        if not self.api_key or not hasattr(self, 'created_no_reply_rule_id'):
+            self.log_test("Delete No Reply Rule", False, "No API key or no reply rule ID available")
+            return
+
+        success, data, status_code = self.make_request('DELETE', f'api/automation/rules/{self.created_no_reply_rule_id}')
+        
+        if success and data.get('success'):
+            self.log_test("Delete No Reply Rule", True, f"No reply rule deleted successfully")
+        else:
+            self.log_test("Delete No Reply Rule", False, f"Status: {status_code}, Response: {data}")
+
+    def test_delete_assign_rule(self):
+        """Test deleting the assign rule"""
+        if not self.api_key or not hasattr(self, 'created_assign_rule_id'):
+            self.log_test("Delete Assign Rule", False, "No API key or assign rule ID available")
+            return
+
+        success, data, status_code = self.make_request('DELETE', f'api/automation/rules/{self.created_assign_rule_id}')
+        
+        if success and data.get('success'):
+            self.log_test("Delete Assign Rule", True, f"Assign rule deleted successfully")
+        else:
+            self.log_test("Delete Assign Rule", False, f"Status: {status_code}, Response: {data}")
+
     def run_all_tests(self):
         """Run all tests in sequence"""
         print("🚀 Starting WhatsApp Business API Backend Tests")
@@ -849,11 +1140,41 @@ class WhatsAppAPITester:
         self.test_webhook_auto_create_lead()
         self.test_webhook_increment_message_count()
         
+        # ============== AUTOMATION ENGINE TESTS ==============
+        print("\n⚡ Testing Automation Engine...")
+        
+        # Test automation metadata endpoints
+        self.test_list_trigger_types()
+        self.test_list_action_types()
+        
+        # Test scheduler status
+        self.test_scheduler_status()
+        
+        # Test automation rule CRUD operations
+        self.test_create_automation_rule()
+        self.test_list_automation_rules()
+        self.test_get_automation_rule_by_id()
+        self.test_update_automation_rule()
+        self.test_toggle_automation_rule()
+        
+        # Test different rule types
+        self.test_create_no_reply_rule()
+        self.test_create_assign_lead_rule()
+        
+        # Test execution logs
+        self.test_list_execution_logs()
+        self.test_list_execution_logs_with_filters()
+        
         print("\n🧹 Testing Cleanup Operations...")
         
         # Cleanup tests
         self.test_delete_lead()
         self.test_deactivate_agent()
+        
+        # Cleanup automation rules
+        self.test_delete_automation_rule()
+        self.test_delete_no_reply_rule()
+        self.test_delete_assign_rule()
 
         # Print summary
         print("=" * 60)

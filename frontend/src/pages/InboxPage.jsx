@@ -76,7 +76,7 @@ const InboxPage = () => {
     : null;
 
   return (
-    <div className="inbox-container w-full h-screen grid grid-cols-1 lg:grid-cols-4 overflow-hidden">
+    <div className="inbox-container w-full h-screen grid grid-cols-4 overflow-hidden">
       {/* Conversation List */}
       <ConversationListPanel
         conversations={conversations}
@@ -85,7 +85,7 @@ const InboxPage = () => {
         loading={loadingConversations}
       />
 
-      {/* Chat Interface */}
+      {/* Chat Interface - spans 2 columns */}
       <ChatMessageInterface
         conversation={currentConversation}
         messages={messages}
