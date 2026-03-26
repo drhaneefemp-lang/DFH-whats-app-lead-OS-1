@@ -1,101 +1,118 @@
-# WhatsApp Business API + CRM + Inbox UI - PRD
+# WhatsApp Business API + CRM + Inbox + Automation - PRD
 
 ## Original Problem Statement
-1. **WhatsApp Business API Service**: Connect multiple WhatsApp numbers, handle webhooks, store messages, send messages via API
-2. **CRM Module**: Auto-create leads from WhatsApp messages, manage agents, track lead stages
-3. **Inbox UI**: WhatsApp-style chat interface with conversation list, chat panel, and lead sidebar
+1. **WhatsApp Business API Service**: Connect multiple WhatsApp numbers, handle webhooks, store messages
+2. **CRM Module**: Auto-create leads, manage agents, track lead stages
+3. **Inbox UI**: WhatsApp-style chat interface with conversation list, chat panel, lead sidebar
+4. **Automation Engine**: Rule-based triggers, scheduled actions, automated follow-ups
 
 ## User Choices
-- **WhatsApp Provider**: Meta's official WhatsApp Cloud API
-- **Authentication**: API Key-based (auto-created on first load)
-- **Message Types**: Text + Media (images, documents, videos)
+- **WhatsApp Provider**: Meta WhatsApp Cloud API
+- **Authentication**: API Key-based
 - **Database**: MongoDB
-- **Lead Creation**: Auto-create from incoming WhatsApp messages
-- **Agent Management**: Full CRUD system
-- **Frontend**: React with polling for real-time updates
-- **Access**: Open (no login required)
+- **Real-time**: Polling
+- **Scheduler**: APScheduler (in-process)
+- **Rule Execution**: All matching rules execute
 
 ## Architecture
 - **Backend**: FastAPI (Python)
 - **Frontend**: React + TailwindCSS
 - **Database**: MongoDB
-- **Real-time**: Polling (5s conversations, 3s messages)
+- **Scheduler**: APScheduler (AsyncIO)
 
 ## What's Been Implemented
 
 ### Phase 1: WhatsApp Integration (2026-03-26)
 - ✅ Multi-number WhatsApp support
-- ✅ Webhook verification & message receiver
+- ✅ Webhook handling
 - ✅ Message sending (text, image, document, video, template)
-- ✅ Message storage with status tracking
 
 ### Phase 2: CRM Module (2026-03-26)
-- ✅ Agent management (create, list, update, deactivate)
-- ✅ Lead management (create, list, update, delete)
+- ✅ Agent management
+- ✅ Lead management with auto-creation
 - ✅ Lead stages: New → Contacted → Interested → Converted/Lost
-- ✅ Auto-lead creation from WhatsApp messages
-- ✅ Lead assignment to agents
-- ✅ Lead status history tracking
 
 ### Phase 3: Inbox UI (2026-03-26)
 - ✅ 3-panel WhatsApp-style layout
-- ✅ Conversation list with search & status filter
-- ✅ Chat interface with message display
-- ✅ Lead details sidebar
-- ✅ Agent assignment dropdown
-- ✅ Status update dropdown
-- ✅ Tag management
-- ✅ Real-time polling updates
+- ✅ Conversation list, chat interface, lead sidebar
+- ✅ Agent assignment and status updates
 
-## UI Components
+### Phase 4: Automation Engine (2026-03-26)
+- ✅ Rule engine with condition evaluation
+- ✅ 5 Trigger types: new_message, new_lead, no_reply, lead_status_change, scheduled
+- ✅ 5 Action types: send_message, assign_lead, update_status, add_tag, send_template
+- ✅ APScheduler with 3 jobs:
+  - Execute Scheduled Tasks (every minute)
+  - Check No Reply Leads (hourly)
+  - Run Cron Rules (hourly)
+- ✅ Delayed actions with scheduling
+- ✅ Frontend rule management UI
 
-### Conversation List Panel
-- Search by name/phone
-- Filter by lead status
-- Show contact name, last message, status indicator
-- Active conversation highlighting
+## Automation API Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/automation/triggers | List trigger types |
+| GET | /api/automation/actions | List action types |
+| POST | /api/automation/rules | Create rule |
+| GET | /api/automation/rules | List rules |
+| GET | /api/automation/rules/{id} | Get rule |
+| PATCH | /api/automation/rules/{id} | Update rule |
+| POST | /api/automation/rules/{id}/toggle | Toggle active |
+| DELETE | /api/automation/rules/{id} | Delete rule |
+| GET | /api/automation/logs | Execution logs |
+| GET | /api/automation/scheduler/status | Scheduler status |
 
-### Chat Message Interface
-- WhatsApp-style bubbles (green for outbound, white for inbound)
-- Date separators
-- Message timestamps
-- Status indicators (sent, delivered, read)
-- Message input with send button
+## Example Automation Rules
 
-### Lead Details Sidebar
-- Contact information
-- Lead status with dropdown
-- Agent assignment with dropdown
-- Tag management (add/remove)
-- First message display
-- Notes section
+### Welcome New Leads
+```json
+{
+  "trigger_type": "new_lead",
+  "actions": [{
+    "action_type": "send_message",
+    "config": {"message_text": "Welcome! Thanks for reaching out."}
+  }]
+}
+```
 
-## Tech Stack
-- **Frontend**: React 19, TailwindCSS, Phosphor Icons
-- **Backend**: FastAPI, Motor (MongoDB async driver)
-- **Fonts**: Chivo (headings), IBM Plex Sans (body)
-- **Colors**: Green primary (#22C55E), gray backgrounds
+### 24h Follow-up
+```json
+{
+  "trigger_type": "no_reply",
+  "trigger_config": {"hours": 24},
+  "conditions": [{"field": "lead.status", "operator": "equals", "value": "new"}],
+  "actions": [{
+    "action_type": "send_message",
+    "config": {"message_text": "Just checking in..."}
+  }]
+}
+```
+
+## Frontend Routes
+- `/` - Inbox (conversations, chat, lead details)
+- `/automation` - Automation rules management
 
 ## Prioritized Backlog
 
 ### P0 (Done)
 - [x] WhatsApp API integration
 - [x] CRM with leads & agents
-- [x] Inbox UI with 3-panel layout
+- [x] Inbox UI
+- [x] Automation engine with rule builder UI
 
 ### P1 (Future)
-- [ ] WebSocket for true real-time
-- [ ] Message read receipts
-- [ ] Quick reply templates
-- [ ] Agent performance dashboard
+- [ ] WebSocket for real-time messages
+- [ ] Webhook signature verification
+- [ ] Bulk message campaigns
+- [ ] Analytics dashboard
 
 ### P2 (Nice to have)
 - [ ] Mobile responsive design
 - [ ] Dark mode
-- [ ] Message search
-- [ ] File upload for media messages
+- [ ] Message templates library
+- [ ] A/B testing for automation rules
 
 ## Next Tasks
 1. Configure real Meta WhatsApp credentials
-2. Test end-to-end message flow with real WhatsApp number
-3. Add WebSocket for instant message updates
+2. Test end-to-end automation flow with real messages
+3. Add webhook signature verification for security
