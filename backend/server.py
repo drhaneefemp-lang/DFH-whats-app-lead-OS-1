@@ -16,7 +16,7 @@ import logging
 import json
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from models import (
     WhatsAppNumberCreate, WhatsAppNumber, WhatsAppNumberResponse,
@@ -963,6 +963,277 @@ async def delete_lead(lead_id: str):
     
     logger.info(f"Deleted lead: {lead_id}")
     return {"success": True, "message": "Lead deleted"}
+
+
+# ============== Dashboard API ==============
+
+@api_router.get("/dashboard/metrics", dependencies=[Depends(verify_api_key)])
+async def get_dashboard_metrics(
+    start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
+    end_date: Optional[str] = Query(None, description="End date (ISO format)")
+):
+    """
+    Get dashboard metrics with optional date filtering
+    
+    Returns:
+    - Total leads, new leads, converted leads
+    - Conversion rate
+    - Average response time
+    - Leads by status, source, agent
+    """
+    # Build date filter
+    date_filter = {}
+    if start_date:
+        date_filter["$gte"] = start_date
+    if end_date:
+        date_filter["$lte"] = end_date
+    
+    lead_query = {}
+    message_query = {}
+    if date_filter:
+        lead_query["created_at"] = date_filter
+        message_query["created_at"] = date_filter
+    
+    # Total leads
+    total_leads = await db.leads.count_documents(lead_query)
+    
+    # Leads by status
+    leads_by_status = {}
+    for status in ["new", "contacted", "interested", "converted", "lost"]:
+        status_query = {**lead_query, "status": status}
+        leads_by_status[status] = await db.leads.count_documents(status_query)
+    
+    # Conversion rate
+    converted = leads_by_status.get("converted", 0)
+    conversion_rate = (converted / total_leads * 100) if total_leads > 0 else 0
+    
+    # Leads by source
+    leads_by_source = {}
+    for source in ["whatsapp", "manual", "website", "referral", "other"]:
+        source_query = {**lead_query, "source": source}
+        leads_by_source[source] = await db.leads.count_documents(source_query)
+    
+    # Messages stats
+    total_messages = await db.messages.count_documents(message_query)
+    inbound_messages = await db.messages.count_documents({**message_query, "direction": "inbound"})
+    outbound_messages = await db.messages.count_documents({**message_query, "direction": "outbound"})
+    
+    # Agent performance
+    agents = await db.agents.find({"is_active": True}, {"_id": 0}).to_list(100)
+    agent_performance = []
+    for agent in agents:
+        agent_leads_query = {**lead_query, "assigned_agent_id": agent["id"]}
+        agent_leads = await db.leads.count_documents(agent_leads_query)
+        agent_converted = await db.leads.count_documents({**agent_leads_query, "status": "converted"})
+        agent_performance.append({
+            "id": agent["id"],
+            "name": agent["name"],
+            "leads_count": agent_leads,
+            "converted_count": agent_converted,
+            "conversion_rate": (agent_converted / agent_leads * 100) if agent_leads > 0 else 0
+        })
+    
+    # Sort by leads count
+    agent_performance.sort(key=lambda x: x["leads_count"], reverse=True)
+    
+    # Unassigned leads
+    unassigned_leads = await db.leads.count_documents({**lead_query, "assigned_agent_id": None})
+    
+    return {
+        "total_leads": total_leads,
+        "new_leads": leads_by_status.get("new", 0),
+        "converted_leads": converted,
+        "lost_leads": leads_by_status.get("lost", 0),
+        "conversion_rate": round(conversion_rate, 1),
+        "leads_by_status": leads_by_status,
+        "leads_by_source": leads_by_source,
+        "total_messages": total_messages,
+        "inbound_messages": inbound_messages,
+        "outbound_messages": outbound_messages,
+        "agent_performance": agent_performance,
+        "unassigned_leads": unassigned_leads
+    }
+
+
+@api_router.get("/dashboard/leads-over-time", dependencies=[Depends(verify_api_key)])
+async def get_leads_over_time(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    interval: str = Query("day", description="Grouping interval: hour, day, week, month")
+):
+    """Get leads created over time for charts"""
+    # Build date filter
+    match_stage = {}
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        match_stage["created_at"] = date_filter
+    
+    # Get all leads in range
+    leads = await db.leads.find(match_stage, {"_id": 0, "created_at": 1, "status": 1}).to_list(10000)
+    
+    # Group by date
+    from collections import defaultdict
+    grouped = defaultdict(lambda: {"total": 0, "converted": 0})
+    
+    for lead in leads:
+        created_at = lead.get("created_at", "")
+        if isinstance(created_at, str) and created_at:
+            # Extract date part based on interval
+            if interval == "hour":
+                key = created_at[:13]  # YYYY-MM-DDTHH
+            elif interval == "day":
+                key = created_at[:10]  # YYYY-MM-DD
+            elif interval == "week":
+                # Get week start
+                from datetime import datetime
+                dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                week_start = dt - timedelta(days=dt.weekday())
+                key = week_start.strftime("%Y-%m-%d")
+            else:  # month
+                key = created_at[:7]  # YYYY-MM
+            
+            grouped[key]["total"] += 1
+            if lead.get("status") == "converted":
+                grouped[key]["converted"] += 1
+    
+    # Convert to list and sort
+    result = [
+        {"date": k, "total": v["total"], "converted": v["converted"]}
+        for k, v in sorted(grouped.items())
+    ]
+    
+    return {"data": result, "interval": interval}
+
+
+@api_router.get("/dashboard/messages-over-time", dependencies=[Depends(verify_api_key)])
+async def get_messages_over_time(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    interval: str = Query("day")
+):
+    """Get messages over time for charts"""
+    match_stage = {}
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        match_stage["created_at"] = date_filter
+    
+    messages = await db.messages.find(
+        match_stage, 
+        {"_id": 0, "created_at": 1, "direction": 1}
+    ).to_list(10000)
+    
+    from collections import defaultdict
+    grouped = defaultdict(lambda: {"inbound": 0, "outbound": 0})
+    
+    for msg in messages:
+        created_at = msg.get("created_at", "")
+        if isinstance(created_at, str) and created_at:
+            if interval == "hour":
+                key = created_at[:13]
+            elif interval == "day":
+                key = created_at[:10]
+            else:
+                key = created_at[:7]
+            
+            direction = msg.get("direction", "inbound")
+            grouped[key][direction] += 1
+    
+    result = [
+        {"date": k, "inbound": v["inbound"], "outbound": v["outbound"]}
+        for k, v in sorted(grouped.items())
+    ]
+    
+    return {"data": result, "interval": interval}
+
+
+@api_router.get("/dashboard/response-times", dependencies=[Depends(verify_api_key)])
+async def get_response_times(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None)
+):
+    """
+    Calculate average response time
+    Response time = time between inbound message and next outbound message to same number
+    """
+    match_stage = {}
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        match_stage["created_at"] = date_filter
+    
+    # Get all messages sorted by time
+    messages = await db.messages.find(
+        match_stage,
+        {"_id": 0, "created_at": 1, "direction": 1, "sender": 1, "recipient": 1}
+    ).sort("created_at", 1).to_list(10000)
+    
+    # Calculate response times
+    from datetime import datetime
+    response_times = []
+    pending_inbound = {}  # phone -> timestamp
+    
+    for msg in messages:
+        created_at = msg.get("created_at", "")
+        if not created_at:
+            continue
+            
+        try:
+            msg_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        except:
+            continue
+        
+        if msg.get("direction") == "inbound":
+            phone = msg.get("sender")
+            if phone:
+                pending_inbound[phone] = msg_time
+        
+        elif msg.get("direction") == "outbound":
+            phone = msg.get("recipient")
+            if phone and phone in pending_inbound:
+                inbound_time = pending_inbound[phone]
+                response_time = (msg_time - inbound_time).total_seconds() / 60  # minutes
+                if response_time > 0 and response_time < 1440:  # Less than 24 hours
+                    response_times.append(response_time)
+                del pending_inbound[phone]
+    
+    # Calculate stats
+    if response_times:
+        avg_response = sum(response_times) / len(response_times)
+        min_response = min(response_times)
+        max_response = max(response_times)
+        
+        # Distribution buckets
+        distribution = {
+            "under_5min": len([t for t in response_times if t < 5]),
+            "5_to_15min": len([t for t in response_times if 5 <= t < 15]),
+            "15_to_60min": len([t for t in response_times if 15 <= t < 60]),
+            "1_to_4h": len([t for t in response_times if 60 <= t < 240]),
+            "over_4h": len([t for t in response_times if t >= 240])
+        }
+    else:
+        avg_response = 0
+        min_response = 0
+        max_response = 0
+        distribution = {"under_5min": 0, "5_to_15min": 0, "15_to_60min": 0, "1_to_4h": 0, "over_4h": 0}
+    
+    return {
+        "average_minutes": round(avg_response, 1),
+        "min_minutes": round(min_response, 1),
+        "max_minutes": round(max_response, 1),
+        "total_responses": len(response_times),
+        "distribution": distribution
+    }
 
 
 # ============== Automation Rules API ==============

@@ -1093,6 +1093,137 @@ class WhatsAppAPITester:
         else:
             self.log_test("Delete Assign Rule", False, f"Status: {status_code}, Response: {data}")
 
+    # ============== DASHBOARD API TESTS ==============
+
+    def test_dashboard_metrics(self):
+        """Test GET /api/dashboard/metrics - Dashboard metrics endpoint"""
+        if not self.api_key:
+            self.log_test("Dashboard Metrics", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/dashboard/metrics')
+        
+        if success:
+            required_fields = [
+                'total_leads', 'new_leads', 'converted_leads', 'conversion_rate',
+                'leads_by_status', 'leads_by_source', 'total_messages', 
+                'inbound_messages', 'outbound_messages', 'agent_performance'
+            ]
+            
+            missing_fields = [field for field in required_fields if field not in data]
+            
+            if not missing_fields:
+                self.log_test("Dashboard Metrics", True, 
+                             f"Total Leads: {data.get('total_leads')}, Conversion Rate: {data.get('conversion_rate')}%")
+            else:
+                self.log_test("Dashboard Metrics", False, f"Missing fields: {missing_fields}")
+        else:
+            self.log_test("Dashboard Metrics", False, f"Status: {status_code}, Response: {data}")
+
+    def test_dashboard_metrics_with_date_filter(self):
+        """Test dashboard metrics with date filtering"""
+        if not self.api_key:
+            self.log_test("Dashboard Metrics with Date Filter", False, "No API key available")
+            return
+
+        from datetime import datetime, timedelta
+        end_date = datetime.now().isoformat()
+        start_date = (datetime.now() - timedelta(days=30)).isoformat()
+        
+        params = {'start_date': start_date, 'end_date': end_date}
+        success, data, status_code = self.make_request('GET', 'api/dashboard/metrics', params=params)
+        
+        if success:
+            self.log_test("Dashboard Metrics with Date Filter", True, 
+                         f"Filtered data returned successfully")
+        else:
+            self.log_test("Dashboard Metrics with Date Filter", False, f"Status: {status_code}")
+
+    def test_leads_over_time(self):
+        """Test GET /api/dashboard/leads-over-time - Leads over time endpoint"""
+        if not self.api_key:
+            self.log_test("Leads Over Time", False, "No API key available")
+            return
+
+        # Test different intervals
+        intervals = ['day', 'week', 'month']
+        
+        for interval in intervals:
+            params = {'interval': interval}
+            success, data, status_code = self.make_request('GET', 'api/dashboard/leads-over-time', params=params)
+            
+            if success and 'data' in data:
+                data_points = len(data.get('data', []))
+                self.log_test(f"Leads Over Time - {interval}", True, 
+                             f"Returned {data_points} data points")
+            else:
+                self.log_test(f"Leads Over Time - {interval}", False, 
+                             f"Status: {status_code}, Response: {data}")
+
+    def test_messages_over_time(self):
+        """Test GET /api/dashboard/messages-over-time - Messages over time endpoint"""
+        if not self.api_key:
+            self.log_test("Messages Over Time", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/dashboard/messages-over-time')
+        
+        if success and 'data' in data:
+            data_points = len(data.get('data', []))
+            self.log_test("Messages Over Time", True, 
+                         f"Returned {data_points} data points")
+            
+            # Check data structure
+            if data.get('data'):
+                sample_point = data['data'][0]
+                required_keys = ['date', 'inbound', 'outbound']
+                missing_keys = [key for key in required_keys if key not in sample_point]
+                
+                if not missing_keys:
+                    self.log_test("Messages Over Time - Data Structure", True, 
+                                 "All required fields present")
+                else:
+                    self.log_test("Messages Over Time - Data Structure", False, 
+                                 f"Missing keys: {missing_keys}")
+        else:
+            self.log_test("Messages Over Time", False, f"Status: {status_code}")
+
+    def test_response_times(self):
+        """Test GET /api/dashboard/response-times - Response times endpoint"""
+        if not self.api_key:
+            self.log_test("Response Times", False, "No API key available")
+            return
+
+        success, data, status_code = self.make_request('GET', 'api/dashboard/response-times')
+        
+        if success:
+            required_fields = [
+                'average_minutes', 'min_minutes', 'max_minutes', 
+                'total_responses', 'distribution'
+            ]
+            
+            missing_fields = [field for field in required_fields if field not in data]
+            
+            if not missing_fields:
+                self.log_test("Response Times", True, 
+                             f"Avg: {data.get('average_minutes')} min, Total: {data.get('total_responses')}")
+                
+                # Check distribution structure
+                distribution = data.get('distribution', {})
+                dist_keys = ['under_5min', '5_to_15min', '15_to_60min', '1_to_4h', 'over_4h']
+                missing_dist_keys = [key for key in dist_keys if key not in distribution]
+                
+                if not missing_dist_keys:
+                    self.log_test("Response Times - Distribution", True, 
+                                 "All distribution buckets present")
+                else:
+                    self.log_test("Response Times - Distribution", False, 
+                                 f"Missing distribution keys: {missing_dist_keys}")
+            else:
+                self.log_test("Response Times", False, f"Missing fields: {missing_fields}")
+        else:
+            self.log_test("Response Times", False, f"Status: {status_code}")
+
     def run_all_tests(self):
         """Run all tests in sequence"""
         print("🚀 Starting WhatsApp Business API Backend Tests")
@@ -1164,6 +1295,16 @@ class WhatsAppAPITester:
         # Test execution logs
         self.test_list_execution_logs()
         self.test_list_execution_logs_with_filters()
+
+        # ============== DASHBOARD API TESTS ==============
+        print("\n📊 Testing Dashboard APIs...")
+        
+        # Test all dashboard endpoints
+        self.test_dashboard_metrics()
+        self.test_dashboard_metrics_with_date_filter()
+        self.test_leads_over_time()
+        self.test_messages_over_time()
+        self.test_response_times()
         
         print("\n🧹 Testing Cleanup Operations...")
         
