@@ -1,30 +1,125 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* Inbox App Styles */
+
+.inbox-container {
+    height: 100vh;
+    width: 100%;
+    overflow: hidden;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
+/* Conversation item animations */
+.conversation-item {
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.conversation-item:hover {
+    background-color: #f3f4f6;
+}
+
+.conversation-item.active {
+    background-color: #ffffff;
+    border-left: 2px solid #22c55e;
+}
+
+.conversation-item:not(.active) {
+    border-left: 2px solid transparent;
+}
+
+/* Chat bubble animations */
+.chat-bubble {
+    animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
+/* Message input focus */
+.message-input:focus {
+    outline: none;
+    ring: 1px;
+    ring-color: #22c55e;
+    border-color: #22c55e;
+}
+
+/* Tag styles */
+.lead-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background-color: #e5e7eb;
+    color: #374151;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 2px;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 2px;
+}
+
+.status-new {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
+.status-contacted {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.status-interested {
+    background-color: #d1fae5;
+    color: #065f46;
+}
+
+.status-converted {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.status-lost {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+/* Smooth transitions for panels */
+.panel-transition {
+    transition: all 0.2s ease;
+}
+
+/* Empty state */
+.empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+    height: 100%;
+    color: #9ca3af;
 }
 
-.App-link {
-    color: #61dafb;
+/* Loading spinner */
+.loading-spinner {
+    animation: spin 1s linear infinite;
 }
 
-@keyframes App-logo-spin {
+@keyframes spin {
     from {
         transform: rotate(0deg);
     }
